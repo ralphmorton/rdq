@@ -5,7 +5,7 @@ pub trait Item: Sized {
     fn to_stream(&self) -> Vec<(&str, String)>;
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct JsonItem<I> {
     pub id: Option<String>,
     pub item: I
@@ -39,5 +39,48 @@ impl<I: serde::de::DeserializeOwned + serde::Serialize + Sized> Item for JsonIte
     fn to_stream(&self) -> Vec<(&str, String)> {
         let json = serde_json::to_string(&self.item).unwrap();
         vec![("json", json)]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    mod json_item {
+        use crate::queue::{Item, JsonItem};
+
+        #[test]
+        fn serializes_json_correctly() {
+            let item = JsonItem::new("123".to_string());
+            let serialized = item.to_stream();
+
+            let expected = vec![("json", "\"123\"".to_string())];
+            assert_eq!(serialized, expected);
+        }
+
+        #[test]
+        fn deserializes_correctly() {
+            let sid = redis::streams::StreamId {
+                id: "foo".to_string(),
+                map: std::collections::HashMap::from(
+                    [("json".to_string(), redis::Value::SimpleString("\"123\"".to_string()))]
+                )
+            };
+
+            let item : JsonItem<String> = JsonItem::from_stream(&sid).unwrap();
+            assert_eq!(item.id, Some("foo".to_string()));
+            assert_eq!(item.item, "123".to_string());
+        }
+
+        #[test]
+        fn deserialization_fails_gracefully() {
+            let sid = redis::streams::StreamId {
+                id: "foo".to_string(),
+                map: std::collections::HashMap::from(
+                    [("json".to_string(), redis::Value::SimpleString("\"123\"".to_string()))]
+                )
+            };
+
+            let item : Option<JsonItem<i32>> = JsonItem::from_stream(&sid);
+            assert_eq!(item.is_none(), true);
+        }
     }
 }
