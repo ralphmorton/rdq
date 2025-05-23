@@ -201,7 +201,7 @@ impl<I: Item> Backend<I> for Stream<I> {
 
         let drop = pending
             .into_iter()
-            .filter(|(_, _, idle, deliveries)| *idle > min_idle_time && *deliveries > options.max_deliveries)
+            .filter(|(_, _, idle, deliveries)| *idle > min_idle_time && *deliveries >= options.max_deliveries)
             .map(|(id, _, idle, deliveries)| DroppedItem { id, idle, deliveries })
             .collect::<Vec<DroppedItem>>();
 

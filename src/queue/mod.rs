@@ -3,7 +3,7 @@ pub mod error;
 pub mod item;
 pub mod queue;
 
-pub use backend::{Backend, DroppedItem};
+pub use backend::{Backend, DroppedItem, DropOptions};
 pub use backend::combine;
 pub use backend::stream;
 pub use error::Error;
