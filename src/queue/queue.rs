@@ -1,14 +1,13 @@
 use crate::queue::backend::{Backend, DropOptions, DroppedItem};
 use crate::queue::error::Error;
-use crate::queue::item::Item;
 
 #[derive(Clone)]
-pub struct Queue<I: Item, B: Backend<I>> {
+pub struct Queue<I, B: Backend<I>> {
     i: std::marker::PhantomData<I>,
     backend: B
 }
 
-impl<I: Item, B: Backend<I>> Queue<I, B> {
+impl<I, B: Backend<I>> Queue<I, B> {
     pub fn new(backend: B) -> Self {
         Self {
             i: std::marker::PhantomData::default(),
