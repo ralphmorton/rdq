@@ -4,6 +4,7 @@ use crate::queue::backend::{Backend, DropOptions, DroppedItem};
 use crate::queue::error::Error;
 use crate::queue::item::Item;
 
+#[derive(Clone)]
 pub struct Combine<I1: Item, I2: Item, B1: Backend<I1>, B2: Backend<I2>> {
     i1: std::marker::PhantomData<I1>,
     i2: std::marker::PhantomData<I2>,
@@ -13,11 +14,13 @@ pub struct Combine<I1: Item, I2: Item, B1: Backend<I1>, B2: Backend<I2>> {
     dequeue_stage: DequeueStage
 }
 
+#[derive(Clone)]
 enum DequeueStage {
     Backend1,
     Backend2
 }
 
+#[derive(Clone)]
 pub enum DequeueStrategy {
     RoundRobin,
     Precedence
