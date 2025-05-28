@@ -3,10 +3,9 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::queue::backend::{self, Backend};
-use crate::queue::item::Item;
 use crate::queue::queue::Queue;
 
-pub struct Drain<I: Item + Send + Clone, B: Backend<I> + Send + Clone> {
+pub struct Drain<I: Send + Clone, B: Backend<I> + Send + Clone> {
     queue: Queue<I, B>,
     num_workers: usize,
     ack_interval: Duration,
@@ -20,14 +19,14 @@ pub struct DropOptions {
     pub batch_size: u64
 }
 
-pub trait Sink<I: Item> {
+pub trait Sink<I> {
     type InitArgs;
 
     fn init(args: Self::InitArgs) -> Self;
     fn process(&mut self, item: &I);
 }
 
-impl<I: Item + Clone + Send + 'static, B: Backend<I> + Send + Clone + 'static> Drain<I, B> {
+impl<I: Clone + Send + 'static, B: Backend<I> + Send + Clone + 'static> Drain<I, B> {
     pub fn new(
         queue: Queue<I, B>,
         num_workers: usize,
