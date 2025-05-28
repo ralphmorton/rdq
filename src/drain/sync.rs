@@ -20,12 +20,11 @@ pub struct DropOptions {
     pub batch_size: u64
 }
 
-#[async_trait::async_trait]
 pub trait Sink<I: Item> {
     type InitArgs;
 
-    async fn init(args: Self::InitArgs) -> Self;
-    async fn process(&mut self, item: &I);
+    fn init(args: Self::InitArgs) -> Self;
+    fn process(&mut self, item: &I);
 }
 
 impl<I: Item + Clone + Send + 'static, B: Backend<I> + Send + Clone + 'static> Drain<I, B> {
@@ -63,20 +62,13 @@ impl<I: Item + Clone + Send + 'static, B: Backend<I> + Send + Clone + 'static> D
             let tx_ack = tx_ack.clone();
 
             std::thread::spawn(move || {
-                let rt = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .unwrap();
+                let mut sink = S::init(sink_args);
 
-                rt.block_on(async move {
-                    let mut sink = S::init(sink_args).await;
-
-                    loop {
-                        let i = rx_event.lock().unwrap().recv().unwrap();
-                        sink.process(&i).await;
-                        tx_ack.send(i).unwrap();
-                    }
-                });
+                loop {
+                    let i = rx_event.lock().unwrap().recv().unwrap();
+                    sink.process(&i);
+                    tx_ack.send(i).unwrap();
+                }
             });
         }
 
