@@ -86,7 +86,7 @@ impl<I: Clone + Send + 'static, B: Backend<I> + Send + Clone + 'static> Drain<I,
                 }
             }
 
-            let items : Vec<I> = self.queue.dequeue(self.num_workers, dequeue_timeout).unwrap();
+            let items : Vec<I> = self.queue.dequeue(self.num_workers, Some(dequeue_timeout)).unwrap();
             items.into_iter().for_each(|i| tx_process.send(i).unwrap());
         }
     }

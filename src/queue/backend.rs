@@ -5,7 +5,7 @@ use crate::queue::error::Error;
 
 pub trait Backend<I> {
     fn enqueue(&self, item: &I) -> Result<(), Error>;
-    fn dequeue(&mut self, n: usize, timeout: std::time::Duration) -> Result<Vec<I>, Error>;
+    fn dequeue(&mut self, n: usize, timeout: Option<std::time::Duration>) -> Result<Vec<I>, Error>;
     fn ack(&self, items: &Vec<&I>) -> Result<(), Error>;
     fn drop_items(&self, options: &DropOptions) -> Result<Vec<DroppedItem>, Error>;
 }

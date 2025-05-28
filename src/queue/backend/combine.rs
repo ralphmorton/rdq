@@ -51,7 +51,7 @@ impl<I1: Item, I2: Item, B1: Backend<I1>, B2: Backend<I2>> Combine<I1, I2, B1, B
     fn dequeue_round_robin(
         &mut self,
         n: usize,
-        timeout: std::time::Duration
+        timeout: Option<Duration>
     ) -> Result<Vec<Either<I1, I2>>, Error> {
         let res = match self.dequeue_stage {
             DequeueStage::Backend1 => {
@@ -77,12 +77,10 @@ impl<I1: Item, I2: Item, B1: Backend<I1>, B2: Backend<I2>> Combine<I1, I2, B1, B
     fn dequeue_precedence(
         &mut self,
         n: usize,
-        timeout: std::time::Duration
+        timeout: Option<Duration>
     ) -> Result<Vec<Either<I1, I2>>, Error> {
-        let no_timeout = Duration::from_millis(0);
-
         let items : Vec<Either<I1, I2>> = self.backend1
-            .dequeue(n, no_timeout)?
+            .dequeue(n, None)?
             .into_iter()
             .map(Either::left)
             .collect();
@@ -92,7 +90,7 @@ impl<I1: Item, I2: Item, B1: Backend<I1>, B2: Backend<I2>> Combine<I1, I2, B1, B
         }
 
         let items : Vec<Either<I1, I2>> = self.backend2
-            .dequeue(n, no_timeout)?
+            .dequeue(n, None)?
             .into_iter()
             .map(Either::right)
             .collect();
@@ -125,7 +123,7 @@ impl<I1: Item, I2: Item, B1: Backend<I1>, B2: Backend<I2>> Backend<Either<I1, I2
     fn dequeue(
         &mut self,
         n: usize,
-        timeout: std::time::Duration
+        timeout: Option<Duration>
     ) -> Result<Vec<Either<I1, I2>>, Error> {
         match self.dequeue_strategy {
             DequeueStrategy::RoundRobin => self.dequeue_round_robin(n, timeout),
@@ -234,7 +232,7 @@ mod tests {
         fn dequeue(
             &mut self,
             n: usize,
-            _timeout: std::time::Duration
+            _timeout: Option<std::time::Duration>
         ) -> Result<Vec<I>, Error> {
             let mut res = vec![];
 
@@ -326,27 +324,27 @@ mod tests {
             ];
             assert_eq!(enqueued_b2, expected_b2);
 
-            let dequeued = c.dequeue(2, std::time::Duration::from_millis(1)).unwrap();
+            let dequeued = c.dequeue(2, None).unwrap();
             let expected = vec![
                 Either::Left(JsonItem::new(1)),
                 Either::Left(JsonItem::new(3))
             ];
             assert_eq!(dequeued, expected);
 
-            let dequeued = c.dequeue(2, std::time::Duration::from_millis(1)).unwrap();
+            let dequeued = c.dequeue(2, None).unwrap();
             let expected = vec![
                 Either::Right(JsonItem::new(2)),
                 Either::Right(JsonItem::new(4))
             ];
             assert_eq!(dequeued, expected);
 
-            let dequeued = c.dequeue(2, std::time::Duration::from_millis(1)).unwrap();
+            let dequeued = c.dequeue(2, None).unwrap();
             let expected = vec![
                 Either::Left(JsonItem::new(5))
             ];
             assert_eq!(dequeued, expected);
 
-            let dequeued = c.dequeue(2, std::time::Duration::from_millis(1)).unwrap();
+            let dequeued = c.dequeue(2, None).unwrap();
             let expected = vec![];
             assert_eq!(dequeued, expected);
         }
@@ -454,27 +452,27 @@ mod tests {
             ];
             assert_eq!(enqueued_b2, expected_b2);
 
-            let dequeued = c.dequeue(2, std::time::Duration::from_millis(1)).unwrap();
+            let dequeued = c.dequeue(2, None).unwrap();
             let expected = vec![
                 Either::Left(JsonItem::new(1)),
                 Either::Left(JsonItem::new(3))
             ];
             assert_eq!(dequeued, expected);
 
-            let dequeued = c.dequeue(2, std::time::Duration::from_millis(1)).unwrap();
+            let dequeued = c.dequeue(2, None).unwrap();
             let expected = vec![
                 Either::Left(JsonItem::new(5))
             ];
             assert_eq!(dequeued, expected);
 
-            let dequeued = c.dequeue(2, std::time::Duration::from_millis(1)).unwrap();
+            let dequeued = c.dequeue(2, None).unwrap();
             let expected = vec![
                 Either::Right(JsonItem::new(2)),
                 Either::Right(JsonItem::new(4))
             ];
             assert_eq!(dequeued, expected);
 
-            let dequeued = c.dequeue(2, std::time::Duration::from_millis(1)).unwrap();
+            let dequeued = c.dequeue(2, None).unwrap();
             let expected = vec![];
             assert_eq!(dequeued, expected);
         }

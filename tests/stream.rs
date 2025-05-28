@@ -5,17 +5,15 @@ use rdq::queue::stream::AutoclaimOptions;
 
 #[test]
 fn enqueue_dequeue() {
-    let timeout = std::time::Duration::from_millis(1);
     let mut queue = util::create_stream_queue::<JsonItem<i32>>(None);
 
     queue.enqueue(&JsonItem::new(123)).unwrap();
-    let dequeued : Vec<i32> = queue.dequeue(1, timeout).unwrap().into_iter().map(|i| i.item).collect();
+    let dequeued : Vec<i32> = queue.dequeue(1, None).unwrap().into_iter().map(|i| i.item).collect();
     assert_eq!(dequeued, vec![123]);
 }
 
 #[test]
 fn batch_dequeue() {
-    let timeout = std::time::Duration::from_millis(1);
     let mut queue = util::create_stream_queue::<JsonItem<i32>>(None);
 
     util::enqueue_all(
@@ -29,23 +27,21 @@ fn batch_dequeue() {
         ]
     );
 
-    let dequeued : Vec<i32> = queue.dequeue(2, timeout).unwrap().into_iter().map(|i| i.item).collect();
+    let dequeued : Vec<i32> = queue.dequeue(2, None).unwrap().into_iter().map(|i| i.item).collect();
     assert_eq!(dequeued, vec![1, 2]);
 
-    let dequeued : Vec<i32> = queue.dequeue(2, timeout).unwrap().into_iter().map(|i| i.item).collect();
+    let dequeued : Vec<i32> = queue.dequeue(2, None).unwrap().into_iter().map(|i| i.item).collect();
     assert_eq!(dequeued, vec![3, 4]);
 
-    let dequeued : Vec<i32> = queue.dequeue(2, timeout).unwrap().into_iter().map(|i| i.item).collect();
+    let dequeued : Vec<i32> = queue.dequeue(2, None).unwrap().into_iter().map(|i| i.item).collect();
     assert_eq!(dequeued, vec![5]);
 
-    let dequeued : Vec<i32> = queue.dequeue(2, timeout).unwrap().into_iter().map(|i| i.item).collect();
+    let dequeued : Vec<i32> = queue.dequeue(2, None).unwrap().into_iter().map(|i| i.item).collect();
     assert_eq!(dequeued.is_empty(), true);
 }
 
 #[test]
 fn autoclaim_frequency() {
-    let timeout = std::time::Duration::from_millis(1);
-
     let autoclaim_options = AutoclaimOptions {
         frequency: 2,
         min_idle_time: std::time::Duration::from_millis(0)
@@ -65,24 +61,22 @@ fn autoclaim_frequency() {
     );
 
     // Dequeued but not acked, will be autoclaimed
-    let dequeued : Vec<i32> = queue.dequeue(2, timeout).unwrap().into_iter().map(|i| i.item).collect();
+    let dequeued : Vec<i32> = queue.dequeue(2, None).unwrap().into_iter().map(|i| i.item).collect();
     assert_eq!(dequeued, vec![1, 2]);
 
-    let dequeued = queue.dequeue(3, timeout).unwrap();
+    let dequeued = queue.dequeue(3, None).unwrap();
     queue.ack(&dequeued.iter().collect()).unwrap();
     let dequeued : Vec<i32> = dequeued.into_iter().map(|i| i.item).collect();
     assert_eq!(dequeued, vec![3, 4, 5]);
 
     std::thread::sleep(std::time::Duration::from_millis(10));
 
-    let dequeued : Vec<i32> = queue.dequeue(3, timeout).unwrap().into_iter().map(|i| i.item).collect();
+    let dequeued : Vec<i32> = queue.dequeue(3, None).unwrap().into_iter().map(|i| i.item).collect();
     assert_eq!(dequeued, vec![1, 2]);
 }
 
 #[test]
 fn autoclaim_idle_time() {
-    let timeout = std::time::Duration::from_millis(1);
-
     let autoclaim_options = AutoclaimOptions {
         frequency: 4,
         min_idle_time: std::time::Duration::from_millis(100)
@@ -103,11 +97,11 @@ fn autoclaim_idle_time() {
 
     // Dequeued but not acked, will be autoclaimed
     // Dequeue #1 is a read
-    let dequeued : Vec<i32> = queue.dequeue(2, timeout).unwrap().into_iter().map(|i| i.item).collect();
+    let dequeued : Vec<i32> = queue.dequeue(2, None).unwrap().into_iter().map(|i| i.item).collect();
     assert_eq!(dequeued, vec![1, 2]);
 
     // Dequeue #2 is a read
-    let dequeued = queue.dequeue(3, timeout).unwrap();
+    let dequeued = queue.dequeue(3, None).unwrap();
     queue.ack(&dequeued.iter().collect()).unwrap();
     let dequeued : Vec<i32> = dequeued.into_iter().map(|i| i.item).collect();
     assert_eq!(dequeued, vec![3, 4, 5]);
@@ -115,23 +109,22 @@ fn autoclaim_idle_time() {
     std::thread::sleep(std::time::Duration::from_millis(10));
 
     // Dequeue #3 is a read
-    let dequeued : Vec<i32> = queue.dequeue(3, timeout).unwrap().into_iter().map(|i| i.item).collect();
+    let dequeued : Vec<i32> = queue.dequeue(3, None).unwrap().into_iter().map(|i| i.item).collect();
     assert_eq!(dequeued.is_empty(), true);
 
     std::thread::sleep(std::time::Duration::from_millis(100));
 
     // Dequeue #4 is a read
-    let dequeued : Vec<i32> = queue.dequeue(3, timeout).unwrap().into_iter().map(|i| i.item).collect();
+    let dequeued : Vec<i32> = queue.dequeue(3, None).unwrap().into_iter().map(|i| i.item).collect();
     assert_eq!(dequeued.is_empty(), true);
 
     // Dequeue #5 is an autoclaim
-    let dequeued : Vec<i32> = queue.dequeue(3, timeout).unwrap().into_iter().map(|i| i.item).collect();
+    let dequeued : Vec<i32> = queue.dequeue(3, None).unwrap().into_iter().map(|i| i.item).collect();
     assert_eq!(dequeued, vec![1, 2]);
 }
 
 #[test]
 fn drop_items() {
-    let timeout = std::time::Duration::from_millis(1);
     let mut queue = util::create_stream_queue::<JsonItem<i32>>(None);
 
     util::enqueue_all(
@@ -146,12 +139,12 @@ fn drop_items() {
     );
 
     // Dequeued but not acked, will be dropped
-    let dequeued = queue.dequeue(3, timeout).unwrap();
+    let dequeued = queue.dequeue(3, None).unwrap();
     let dequeued_items : Vec<i32> = dequeued.iter().map(|i| i.item.clone()).collect();
     assert_eq!(dequeued_items, vec![1, 2, 3]);
 
     // Dequeued and acked, not in the stream at drop time
-    let dequeued2 = queue.dequeue(2, timeout).unwrap();
+    let dequeued2 = queue.dequeue(2, None).unwrap();
     queue.ack(&dequeued2.iter().collect()).unwrap();
     let dequeued2 : Vec<i32> = dequeued2.into_iter().map(|i| i.item).collect();
     assert_eq!(dequeued2, vec![4, 5]);

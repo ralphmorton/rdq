@@ -69,15 +69,18 @@ impl<I: Item> Stream<I> {
     fn read(
         &mut self,
         n: usize,
-        timeout: usize,
+        timeout: Option<std::time::Duration>,
         next_autoclaim: &Option<usize>
     ) -> Result<Vec<I>, Error> {
         let mut conn = self.redis.get()?;
 
-        let opts = redis::streams::StreamReadOptions::default()
+        let mut opts = redis::streams::StreamReadOptions::default()
             .group(&self.queue_name, &self.consumer)
-            .count(n)
-            .block(timeout);
+            .count(n);
+
+        if let Some(timeout) = timeout {
+            opts = opts.block(timeout.as_millis() as usize);
+        }
 
         let res : redis::streams::StreamReadReply = conn.xread_options(&[&self.stream_key], &[">"], &opts)?;
 
@@ -154,11 +157,11 @@ impl<I: Item> Backend<I> for Stream<I> {
     fn dequeue(
         &mut self,
         n: usize,
-        timeout: std::time::Duration
+        timeout: Option<std::time::Duration>
     ) -> Result<Vec<I>, crate::queue::error::Error> {
         match self.dequeue_stage.clone() {
             DequeueStage::Read { next_autoclaim } => {
-                self.read(n, timeout.as_millis() as usize, &next_autoclaim)
+                self.read(n, timeout, &next_autoclaim)
             },
             DequeueStage::Autoclaim { next_stream_id } => {
                 self.autoclaim(n, &next_stream_id)

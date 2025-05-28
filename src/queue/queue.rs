@@ -25,7 +25,7 @@ impl<I, B: Backend<I>> Queue<I, B> {
     pub fn dequeue(
         &mut self,
         n: usize,
-        timeout: std::time::Duration
+        timeout: Option<std::time::Duration>
     ) -> Result<Vec<I>, Error> {
         self.backend.dequeue(n, timeout)
     }
