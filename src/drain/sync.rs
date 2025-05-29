@@ -23,7 +23,7 @@ pub trait Sink<I> {
     type InitArgs;
 
     fn init(args: Self::InitArgs) -> Self;
-    fn process(&mut self, item: &I);
+    fn process(&mut self, item: &I) -> bool;
 }
 
 impl<I: Clone + Send + 'static, B: Backend<I> + Send + Clone + 'static> Drain<I, B> {
@@ -65,8 +65,11 @@ impl<I: Clone + Send + 'static, B: Backend<I> + Send + Clone + 'static> Drain<I,
 
                 loop {
                     let i = rx_event.lock().unwrap().recv().unwrap();
-                    sink.process(&i);
-                    tx_ack.send(i).unwrap();
+                    let ack = sink.process(&i);
+
+                    if ack {
+                        tx_ack.send(i).unwrap();
+                    }
                 }
             });
         }
