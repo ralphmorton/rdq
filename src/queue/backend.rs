@@ -3,11 +3,12 @@ pub mod stream;
 
 use crate::queue::error::Error;
 
+#[async_trait::async_trait]
 pub trait Backend<I> {
-    fn enqueue(&self, item: &I) -> Result<(), Error>;
-    fn dequeue(&mut self, n: usize, timeout: Option<std::time::Duration>) -> Result<Vec<I>, Error>;
-    fn ack(&self, items: &Vec<&I>) -> Result<(), Error>;
-    fn drop_items(&self, options: &DropOptions) -> Result<Vec<DroppedItem>, Error>;
+    async fn enqueue(&mut self, item: &I) -> Result<(), Error>;
+    async fn dequeue(&mut self, n: usize, timeout: Option<std::time::Duration>) -> Result<Vec<I>, Error>;
+    async fn ack(&mut self, items: &Vec<&I>) -> Result<(), Error>;
+    async fn drop_items(&mut self, options: &DropOptions) -> Result<Vec<DroppedItem>, Error>;
 }
 
 #[derive(Clone)]

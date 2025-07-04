@@ -15,32 +15,32 @@ impl<I, B: Backend<I>> Queue<I, B> {
         }
     }
 
-    pub fn enqueue(
-        &self,
+    pub async fn enqueue(
+        &mut self,
         item: &I
     ) -> Result<(), Error> {
-        self.backend.enqueue(item)
+        self.backend.enqueue(item).await
     }
 
-    pub fn dequeue(
+    pub async fn dequeue(
         &mut self,
         n: usize,
         timeout: Option<std::time::Duration>
     ) -> Result<Vec<I>, Error> {
-        self.backend.dequeue(n, timeout)
+        self.backend.dequeue(n, timeout).await
     }
 
-    pub fn ack(
-        &self,
+    pub async fn ack(
+        &mut self,
         items: &Vec<&I>
     ) -> Result<(), Error> {
-        self.backend.ack(items)
+        self.backend.ack(items).await
     }
 
-    pub fn drop_items(
-        &self,
+    pub async fn drop_items(
+        &mut self,
         options: &DropOptions
     ) -> Result<Vec<DroppedItem>, Error> {
-        self.backend.drop_items(options)
+        self.backend.drop_items(options).await
     }
 }

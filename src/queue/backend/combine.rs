@@ -48,7 +48,7 @@ impl<I1: Item, I2: Item, B1: Backend<I1>, B2: Backend<I2>> Combine<I1, I2, B1, B
         }
     }
 
-    fn dequeue_round_robin(
+    async fn dequeue_round_robin(
         &mut self,
         n: usize,
         timeout: Option<Duration>
@@ -56,14 +56,16 @@ impl<I1: Item, I2: Item, B1: Backend<I1>, B2: Backend<I2>> Combine<I1, I2, B1, B
         let res = match self.dequeue_stage {
             DequeueStage::Backend1 => {
                 self.backend1
-                    .dequeue(n, timeout)?
+                    .dequeue(n, timeout)
+                    .await?
                     .into_iter()
                     .map(Either::left)
                     .collect()
             },
             DequeueStage::Backend2 => {
                 self.backend2
-                    .dequeue(n, timeout)?
+                    .dequeue(n, timeout)
+                    .await?
                     .into_iter()
                     .map(Either::right)
                     .collect()
@@ -74,13 +76,14 @@ impl<I1: Item, I2: Item, B1: Backend<I1>, B2: Backend<I2>> Combine<I1, I2, B1, B
         Ok(res)
     }
 
-    fn dequeue_precedence(
+    async fn dequeue_precedence(
         &mut self,
         n: usize,
         timeout: Option<Duration>
     ) -> Result<Vec<Either<I1, I2>>, Error> {
         let items : Vec<Either<I1, I2>> = self.backend1
-            .dequeue(n, None)?
+            .dequeue(n, None)
+            .await?
             .into_iter()
             .map(Either::left)
             .collect();
@@ -90,7 +93,8 @@ impl<I1: Item, I2: Item, B1: Backend<I1>, B2: Backend<I2>> Combine<I1, I2, B1, B
         }
 
         let items : Vec<Either<I1, I2>> = self.backend2
-            .dequeue(n, None)?
+            .dequeue(n, None)
+            .await?
             .into_iter()
             .map(Either::right)
             .collect();
@@ -100,7 +104,8 @@ impl<I1: Item, I2: Item, B1: Backend<I1>, B2: Backend<I2>> Combine<I1, I2, B1, B
         }
 
         let items : Vec<Either<I1, I2>> = self.backend1
-            .dequeue(n, timeout)?
+            .dequeue(n, timeout)
+            .await?
             .into_iter()
             .map(Either::left)
             .collect();
@@ -109,44 +114,50 @@ impl<I1: Item, I2: Item, B1: Backend<I1>, B2: Backend<I2>> Combine<I1, I2, B1, B
     }
 }
 
-impl<I1: Item, I2: Item, B1: Backend<I1>, B2: Backend<I2>> Backend<Either<I1, I2>> for Combine<I1, I2, B1, B2> {
-    fn enqueue(
-        &self,
+#[async_trait::async_trait]
+impl<
+    I1: Item + Send + Sync,
+    I2: Item + Send + Sync,
+    B1: Backend<I1> + Send + Sync,
+    B2: Backend<I2> + Send + Sync
+> Backend<Either<I1, I2>> for Combine<I1, I2, B1, B2> {
+    async fn enqueue(
+        &mut self,
         item: &Either<I1, I2>
     ) -> Result<(), Error> {
         match item {
-            Either::Left(i) => self.backend1.enqueue(i),
-            Either::Right(i) => self.backend2.enqueue(i)
+            Either::Left(i) => self.backend1.enqueue(i).await,
+            Either::Right(i) => self.backend2.enqueue(i).await
         }
     }
 
-    fn dequeue(
+    async fn dequeue(
         &mut self,
         n: usize,
         timeout: Option<Duration>
     ) -> Result<Vec<Either<I1, I2>>, Error> {
         match self.dequeue_strategy {
-            DequeueStrategy::RoundRobin => self.dequeue_round_robin(n, timeout),
-            DequeueStrategy::Precedence => self.dequeue_precedence(n, timeout)
+            DequeueStrategy::RoundRobin => self.dequeue_round_robin(n, timeout).await,
+            DequeueStrategy::Precedence => self.dequeue_precedence(n, timeout).await
         }
     }
 
-    fn ack(&self, items: &Vec<&Either<I1, I2>>) -> Result<(), Error> {
+    async fn ack(&mut self, items: &Vec<&Either<I1, I2>>) -> Result<(), Error> {
         let i1 = items.into_iter().filter_map(|i| Either::as_left(*i)).collect();
         let i2 = items.into_iter().filter_map(|i| Either::as_right(*i)).collect();
 
-        self.backend1.ack(&i1)?;
-        self.backend2.ack(&i2)?;
+        self.backend1.ack(&i1).await?;
+        self.backend2.ack(&i2).await?;
 
         Ok(())
     }
 
-    fn drop_items(
-        &self,
+    async fn drop_items(
+        &mut self,
         options: &DropOptions
     ) -> Result<Vec<DroppedItem>, Error> {
-        let d1 = self.backend1.drop_items(options)?;
-        let mut d2 = self.backend2.drop_items(options)?;
+        let d1 = self.backend1.drop_items(options).await?;
+        let mut d2 = self.backend2.drop_items(options).await?;
 
         let mut dropped = d1;
         dropped.append(&mut d2);
@@ -216,9 +227,10 @@ mod tests {
         }
     }
 
-    impl<I: Item + Clone> Backend<I> for TestBackend<I> {
-        fn enqueue(
-            &self,
+    #[async_trait::async_trait]
+    impl<I: Item + Clone + Send + Sync> Backend<I> for TestBackend<I> {
+        async fn enqueue(
+            &mut self,
             item: &I
         ) -> Result<(), Error> {
             self.enqueued
@@ -229,7 +241,7 @@ mod tests {
             Ok(())
         }
 
-        fn dequeue(
+        async fn dequeue(
             &mut self,
             n: usize,
             _timeout: Option<std::time::Duration>
@@ -245,8 +257,8 @@ mod tests {
             Ok(res)
         }
 
-        fn ack(
-            &self,
+        async fn ack(
+            &mut self,
             items: &Vec<&I>
         ) -> Result<(), Error> {
             let mut items = items.iter().map(|i| (*i).clone()).collect();
@@ -255,8 +267,8 @@ mod tests {
             Ok(())
         }
 
-        fn drop_items(
-            &self,
+        async fn drop_items(
+            &mut self,
             _options: &crate::queue::backend::DropOptions
         ) -> Result<Vec<DroppedItem>, Error> {
             Ok(vec![])
@@ -268,12 +280,12 @@ mod tests {
         use crate::queue::JsonItem;
         use crate::queue::backend::combine::{Combine, DequeueStrategy, Either};
 
-        #[test]
-        fn enqueues_into_correct_backend() {
+        #[tokio::test]
+        async fn enqueues_into_correct_backend() {
             let b1 : TestBackend<JsonItem<i32>> = TestBackend::new();
             let b2 : TestBackend<JsonItem<i32>> = TestBackend::new();
-            let c = Combine::new(b1.clone(), b2.clone(), DequeueStrategy::RoundRobin);
-            c.enqueue(&Either::Left(JsonItem::new(42))).unwrap();
+            let mut c = Combine::new(b1.clone(), b2.clone(), DequeueStrategy::RoundRobin);
+            c.enqueue(&Either::Left(JsonItem::new(42))).await.unwrap();
 
             let enqueued_b1 : Vec<JsonItem<i32>> = b1.get_enqueued().into_iter().collect();
             let expected_b1 = vec![JsonItem::new(42)];
@@ -285,8 +297,8 @@ mod tests {
 
             let b1 : TestBackend<JsonItem<i32>> = TestBackend::new();
             let b2 : TestBackend<JsonItem<i32>> = TestBackend::new();
-            let c = Combine::new(b1.clone(), b2.clone(), DequeueStrategy::RoundRobin);
-            c.enqueue(&Either::Right(JsonItem::new(42))).unwrap();
+            let mut c = Combine::new(b1.clone(), b2.clone(), DequeueStrategy::RoundRobin);
+            c.enqueue(&Either::Right(JsonItem::new(42))).await.unwrap();
 
             let enqueued_b1 : Vec<JsonItem<i32>> = b1.get_enqueued().into_iter().collect();
             let expected_b1 = vec![];
@@ -297,17 +309,17 @@ mod tests {
             assert_eq!(enqueued_b2, expected_b2);
         }
 
-        #[test]
-        fn dequeues_round_robin() {
+        #[tokio::test]
+        async fn dequeues_round_robin() {
             let b1 : TestBackend<JsonItem<i32>> = TestBackend::new();
             let b2 : TestBackend<JsonItem<i32>> = TestBackend::new();
             let mut c = Combine::new(b1.clone(), b2.clone(), DequeueStrategy::RoundRobin);
 
-            c.enqueue(&Either::Left(JsonItem::new(1))).unwrap();
-            c.enqueue(&Either::Right(JsonItem::new(2))).unwrap();
-            c.enqueue(&Either::Left(JsonItem::new(3))).unwrap();
-            c.enqueue(&Either::Right(JsonItem::new(4))).unwrap();
-            c.enqueue(&Either::Left(JsonItem::new(5))).unwrap();
+            c.enqueue(&Either::Left(JsonItem::new(1))).await.unwrap();
+            c.enqueue(&Either::Right(JsonItem::new(2))).await.unwrap();
+            c.enqueue(&Either::Left(JsonItem::new(3))).await.unwrap();
+            c.enqueue(&Either::Right(JsonItem::new(4))).await.unwrap();
+            c.enqueue(&Either::Left(JsonItem::new(5))).await.unwrap();
 
             let enqueued_b1 : Vec<JsonItem<i32>> = b1.get_enqueued().into_iter().collect();
             let expected_b1 = vec![
@@ -324,36 +336,36 @@ mod tests {
             ];
             assert_eq!(enqueued_b2, expected_b2);
 
-            let dequeued = c.dequeue(2, None).unwrap();
+            let dequeued = c.dequeue(2, None).await.unwrap();
             let expected = vec![
                 Either::Left(JsonItem::new(1)),
                 Either::Left(JsonItem::new(3))
             ];
             assert_eq!(dequeued, expected);
 
-            let dequeued = c.dequeue(2, None).unwrap();
+            let dequeued = c.dequeue(2, None).await.unwrap();
             let expected = vec![
                 Either::Right(JsonItem::new(2)),
                 Either::Right(JsonItem::new(4))
             ];
             assert_eq!(dequeued, expected);
 
-            let dequeued = c.dequeue(2, None).unwrap();
+            let dequeued = c.dequeue(2, None).await.unwrap();
             let expected = vec![
                 Either::Left(JsonItem::new(5))
             ];
             assert_eq!(dequeued, expected);
 
-            let dequeued = c.dequeue(2, None).unwrap();
+            let dequeued = c.dequeue(2, None).await.unwrap();
             let expected = vec![];
             assert_eq!(dequeued, expected);
         }
 
-        #[test]
-        fn acks_into_correct_backend() {
+        #[tokio::test]
+        async fn acks_into_correct_backend() {
             let b1 : TestBackend<JsonItem<i32>> = TestBackend::new();
             let b2 : TestBackend<JsonItem<i32>> = TestBackend::new();
-            let c = Combine::new(b1.clone(), b2.clone(), DequeueStrategy::RoundRobin);
+            let mut c = Combine::new(b1.clone(), b2.clone(), DequeueStrategy::RoundRobin);
 
             let acked_b1 = b1.get_acked();
             let acked_b2 = b2.get_acked();
@@ -366,7 +378,7 @@ mod tests {
                 .map(|i| Either::left(i.clone()))
                 .collect();
 
-            c.ack(&ack_b1.iter().collect()).unwrap();
+            c.ack(&ack_b1.iter().collect()).await.unwrap();
 
             let acked_b1 = b1.get_acked();
             let acked_b2 = b2.get_acked();
@@ -380,7 +392,7 @@ mod tests {
                 .map(|i| Either::right(i.clone()))
                 .collect();
 
-            c.ack(&ack_b2.iter().collect()).unwrap();
+            c.ack(&ack_b2.iter().collect()).await.unwrap();
 
             let acked_b1 = b1.get_acked();
             let acked_b2 = b2.get_acked();
@@ -396,12 +408,12 @@ mod tests {
         use crate::queue::JsonItem;
         use crate::queue::backend::combine::{Combine, DequeueStrategy, Either};
 
-        #[test]
-        fn enqueues_into_correct_backend() {
+        #[tokio::test]
+        async fn enqueues_into_correct_backend() {
             let b1 : TestBackend<JsonItem<i32>> = TestBackend::new();
             let b2 : TestBackend<JsonItem<i32>> = TestBackend::new();
-            let c = Combine::new(b1.clone(), b2.clone(), DequeueStrategy::Precedence);
-            c.enqueue(&Either::Left(JsonItem::new(42))).unwrap();
+            let mut c = Combine::new(b1.clone(), b2.clone(), DequeueStrategy::Precedence);
+            c.enqueue(&Either::Left(JsonItem::new(42))).await.unwrap();
 
             let enqueued_b1 : Vec<JsonItem<i32>> = b1.get_enqueued().into_iter().collect();
             let expected_b1 = vec![JsonItem::new(42)];
@@ -413,8 +425,8 @@ mod tests {
 
             let b1 : TestBackend<JsonItem<i32>> = TestBackend::new();
             let b2 : TestBackend<JsonItem<i32>> = TestBackend::new();
-            let c = Combine::new(b1.clone(), b2.clone(), DequeueStrategy::Precedence);
-            c.enqueue(&Either::Right(JsonItem::new(42))).unwrap();
+            let mut c = Combine::new(b1.clone(), b2.clone(), DequeueStrategy::Precedence);
+            c.enqueue(&Either::Right(JsonItem::new(42))).await.unwrap();
 
             let enqueued_b1 : Vec<JsonItem<i32>> = b1.get_enqueued().into_iter().collect();
             let expected_b1 = vec![];
@@ -425,17 +437,17 @@ mod tests {
             assert_eq!(enqueued_b2, expected_b2);
         }
 
-        #[test]
-        fn dequeues_by_precedence() {
+        #[tokio::test]
+        async fn dequeues_by_precedence() {
             let b1 : TestBackend<JsonItem<i32>> = TestBackend::new();
             let b2 : TestBackend<JsonItem<i32>> = TestBackend::new();
             let mut c = Combine::new(b1.clone(), b2.clone(), DequeueStrategy::Precedence);
 
-            c.enqueue(&Either::Left(JsonItem::new(1))).unwrap();
-            c.enqueue(&Either::Right(JsonItem::new(2))).unwrap();
-            c.enqueue(&Either::Left(JsonItem::new(3))).unwrap();
-            c.enqueue(&Either::Right(JsonItem::new(4))).unwrap();
-            c.enqueue(&Either::Left(JsonItem::new(5))).unwrap();
+            c.enqueue(&Either::Left(JsonItem::new(1))).await.unwrap();
+            c.enqueue(&Either::Right(JsonItem::new(2))).await.unwrap();
+            c.enqueue(&Either::Left(JsonItem::new(3))).await.unwrap();
+            c.enqueue(&Either::Right(JsonItem::new(4))).await.unwrap();
+            c.enqueue(&Either::Left(JsonItem::new(5))).await.unwrap();
 
             let enqueued_b1 : Vec<JsonItem<i32>> = b1.get_enqueued().into_iter().collect();
             let expected_b1 = vec![
@@ -452,36 +464,36 @@ mod tests {
             ];
             assert_eq!(enqueued_b2, expected_b2);
 
-            let dequeued = c.dequeue(2, None).unwrap();
+            let dequeued = c.dequeue(2, None).await.unwrap();
             let expected = vec![
                 Either::Left(JsonItem::new(1)),
                 Either::Left(JsonItem::new(3))
             ];
             assert_eq!(dequeued, expected);
 
-            let dequeued = c.dequeue(2, None).unwrap();
+            let dequeued = c.dequeue(2, None).await.unwrap();
             let expected = vec![
                 Either::Left(JsonItem::new(5))
             ];
             assert_eq!(dequeued, expected);
 
-            let dequeued = c.dequeue(2, None).unwrap();
+            let dequeued = c.dequeue(2, None).await.unwrap();
             let expected = vec![
                 Either::Right(JsonItem::new(2)),
                 Either::Right(JsonItem::new(4))
             ];
             assert_eq!(dequeued, expected);
 
-            let dequeued = c.dequeue(2, None).unwrap();
+            let dequeued = c.dequeue(2, None).await.unwrap();
             let expected = vec![];
             assert_eq!(dequeued, expected);
         }
 
-        #[test]
-        fn acks_into_correct_backend() {
+        #[tokio::test]
+        async fn acks_into_correct_backend() {
             let b1 : TestBackend<JsonItem<i32>> = TestBackend::new();
             let b2 : TestBackend<JsonItem<i32>> = TestBackend::new();
-            let c = Combine::new(b1.clone(), b2.clone(), DequeueStrategy::Precedence);
+            let mut c = Combine::new(b1.clone(), b2.clone(), DequeueStrategy::Precedence);
 
             let acked_b1 = b1.get_acked();
             let acked_b2 = b2.get_acked();
@@ -494,7 +506,7 @@ mod tests {
                 .map(|i| Either::left(i.clone()))
                 .collect();
 
-            c.ack(&ack_b1.iter().collect()).unwrap();
+            c.ack(&ack_b1.iter().collect()).await.unwrap();
 
             let acked_b1 = b1.get_acked();
             let acked_b2 = b2.get_acked();
@@ -508,7 +520,7 @@ mod tests {
                 .map(|i| Either::right(i.clone()))
                 .collect();
 
-            c.ack(&ack_b2.iter().collect()).unwrap();
+            c.ack(&ack_b2.iter().collect()).await.unwrap();
 
             let acked_b1 = b1.get_acked();
             let acked_b2 = b2.get_acked();

@@ -4,7 +4,7 @@ use rdq::queue::backend::stream::{AutoclaimOptions, Stream};
 
 const REDIS_CONNECTION_STRING : &'static str = "redis://localhost:6378";
 
-pub fn create_stream_queue<I: Item>(
+pub async fn create_stream_queue<I: Item + Send + Sync>(
     autoclaim_options: Option<AutoclaimOptions>
 ) -> Queue<I, Stream<I>> {
     let stream_name = rand::rng()
@@ -21,16 +21,16 @@ pub fn create_stream_queue<I: Item>(
         queue_name,
         "consumer".to_string(),
         autoclaim_options
-    ).unwrap();
+    ).await.unwrap();
 
     Queue::new(stream)
 }
 
-pub fn enqueue_all<I: Item, B: Backend<I>>(
-    queue: &Queue<I, B>,
+pub async fn enqueue_all<I: Item + Send + Sync, B: Backend<I>>(
+    queue: &mut Queue<I, B>,
     items: Vec<I>
 ) {
     for item in items.iter() {
-        queue.enqueue(&item).unwrap();
+        queue.enqueue(&item).await.unwrap();
     }
 }

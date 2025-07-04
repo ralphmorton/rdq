@@ -1,4 +1,4 @@
-use redis::Commands;
+use redis::AsyncCommands;
 
 use crate::queue::backend::{Backend, DropOptions, DroppedItem};
 use crate::queue::error::Error;
@@ -7,7 +7,7 @@ use crate::queue::item::Item;
 #[derive(Clone)]
 pub struct Stream<I: Item> {
     i: std::marker::PhantomData<I>,
-    redis: r2d2::Pool<redis::Client>,
+    redis: redis::aio::ConnectionManager,
     stream_key: String,
     queue_name:  String,
     consumer: String,
@@ -28,7 +28,7 @@ enum DequeueStage {
 }
 
 impl<I: Item> Stream<I> {
-    pub fn build(
+    pub async fn build(
         redis_connection_string: &str,
         stream_key: String,
         queue_name: String,
@@ -36,19 +36,17 @@ impl<I: Item> Stream<I> {
         autoclaim_options: Option<AutoclaimOptions>
     ) -> Result<Self, Error> {
         let redis = redis::Client::open(redis_connection_string)?;
-        let redis = r2d2::Pool::builder().build(redis)?;
+        let mut redis = redis::aio::ConnectionManager::new(redis).await?;
 
-        let mut conn = redis.get().unwrap();
-
-        let queue_group_exists = if conn.exists(&stream_key)? {
-            let existing_groups : redis::streams::StreamInfoGroupsReply = conn.xinfo_groups(&stream_key)?;
+        let queue_group_exists = if redis.exists(&stream_key).await? {
+            let existing_groups : redis::streams::StreamInfoGroupsReply = redis.xinfo_groups(&stream_key).await?;
             existing_groups.groups.iter().find(|g| g.name == queue_name).is_some()
         } else {
             false
         };
 
         if !queue_group_exists {
-            let _ : () = conn.xgroup_create_mkstream(&stream_key, &queue_name, "$")?;
+            let _ : () = redis.xgroup_create_mkstream(&stream_key, &queue_name, "$").await?;
         }
 
         let next_autoclaim = autoclaim_options.clone().map(|o| o.frequency);
@@ -66,14 +64,12 @@ impl<I: Item> Stream<I> {
         Ok(instance)
     }
 
-    fn read(
+    async fn read(
         &mut self,
         n: usize,
         timeout: Option<std::time::Duration>,
         next_autoclaim: &Option<usize>
     ) -> Result<Vec<I>, Error> {
-        let mut conn = self.redis.get()?;
-
         let mut opts = redis::streams::StreamReadOptions::default()
             .group(&self.queue_name, &self.consumer)
             .count(n);
@@ -82,7 +78,7 @@ impl<I: Item> Stream<I> {
             opts = opts.block(timeout.as_millis() as usize);
         }
 
-        let res : redis::streams::StreamReadReply = conn.xread_options(&[&self.stream_key], &[">"], &opts)?;
+        let res : redis::streams::StreamReadReply = self.redis.xread_options(&[&self.stream_key], &[">"], &opts).await?;
 
         if let Some(next_autoclaim) = next_autoclaim {
             self.dequeue_stage = if *next_autoclaim <= 1 {
@@ -105,24 +101,22 @@ impl<I: Item> Stream<I> {
         Ok(items)
     }
 
-    fn autoclaim(
+    async fn autoclaim(
         &mut self,
         n: usize,
         next_stream_id: &str
     ) -> Result<Vec<I>, Error> {
-        let mut conn = self.redis.get()?;
-
         let opts = redis::streams::StreamAutoClaimOptions::default()
             .count(n);
 
-        let res : redis::streams::StreamAutoClaimReply = conn.xautoclaim_options(
+        let res : redis::streams::StreamAutoClaimReply = self.redis.xautoclaim_options(
             &self.stream_key,
             &self.queue_name,
             &self.consumer,
             self.autoclaim_options.as_ref().map(|o| o.min_idle_time.as_millis() as usize).unwrap(),
             next_stream_id,
             opts
-        )?;
+        ).await?;
 
         let items = res.claimed
             .into_iter()
@@ -141,56 +135,51 @@ impl<I: Item> Stream<I> {
     }
 }
 
-impl<I: Item> Backend<I> for Stream<I> {
-    fn enqueue(
-        &self,
+#[async_trait::async_trait]
+impl<I: Item + Send + Sync> Backend<I> for Stream<I> {
+    async fn enqueue(
+        &mut self,
         item: &I
     ) -> Result<(), crate::queue::error::Error> {
-        let mut conn = self.redis.get()?;
-
         let item = item.to_stream();
-        let _ : () = conn.xadd(&self.stream_key, "*", &item)?;
+        let _ : () = self.redis.xadd(&self.stream_key, "*", &item).await?;
 
         Ok(())
     }
 
-    fn dequeue(
+    async fn dequeue(
         &mut self,
         n: usize,
         timeout: Option<std::time::Duration>
     ) -> Result<Vec<I>, crate::queue::error::Error> {
         match self.dequeue_stage.clone() {
             DequeueStage::Read { next_autoclaim } => {
-                self.read(n, timeout, &next_autoclaim)
+                self.read(n, timeout, &next_autoclaim).await
             },
             DequeueStage::Autoclaim { next_stream_id } => {
-                self.autoclaim(n, &next_stream_id)
+                self.autoclaim(n, &next_stream_id).await
             }
         }
     }
 
-    fn ack(
-        &self,
+    async fn ack(
+        &mut self,
         items: &Vec<&I>
     ) -> Result<(), crate::queue::error::Error> {
         if items.is_empty() {
             return Ok(())
         }
 
-        let mut conn = self.redis.get()?;
-
         let ids: Vec<&str> = items.iter().filter_map(|i| i.id()).collect();
-        let _ : () = conn.xack(&self.stream_key, &self.queue_name, &ids)?;
+        let _ : () = self.redis.xack(&self.stream_key, &self.queue_name, &ids).await?;
 
         Ok(())
     }
 
-    fn drop_items(
-        &self,
+    async fn drop_items(
+        &mut self,
         options: &DropOptions
     ) -> Result<Vec<super::DroppedItem>, crate::queue::error::Error> {
-        let mut conn = self.redis.get()?;
-
         let min_idle_time = options.min_idle_time.as_millis() as u64;
 
         let pending : Vec<(String, String, u64, u64)> = redis::cmd("XPENDING")
@@ -199,8 +188,8 @@ impl<I: Item> Backend<I> for Stream<I> {
             .arg("-")
             .arg("+")
             .arg(options.count)
-            .query(&mut conn)?;
-
+            .query_async(&mut self.redis)
+            .await?;
 
         let drop = pending
             .into_iter()
@@ -210,7 +199,7 @@ impl<I: Item> Backend<I> for Stream<I> {
 
         if !drop.is_empty() {
             let drop_ids : Vec<&str> = drop.iter().map(|d| d.id.as_str()).collect();
-            let _ : () = conn.xack(&self.stream_key, &self.queue_name, &drop_ids)?;
+            let _ : () = self.redis.xack(&self.stream_key, &self.queue_name, &drop_ids).await?;
         }
 
         Ok(drop)
